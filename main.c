@@ -37,7 +37,7 @@ int x=0;
 //static FILE uart0_output = FDEV_SETUP_STREAM(USART0_Transmit, NULL, _FDEV_SETUP_WRITE);
 static FILE uart1_output = FDEV_SETUP_STREAM(USART1_Transmit, NULL, _FDEV_SETUP_WRITE);
 static FILE uart1_input = FDEV_SETUP_STREAM(NULL, USART1_Receive, _FDEV_SETUP_READ);
-//static FILE uart0_input = FDEV_SETUP_STREAM(NULL, USART0_Receive, _FDEV_SETUP_READ);
+static FILE uart0_input = FDEV_SETUP_STREAM(NULL, USART0_Receive, _FDEV_SETUP_READ);
 
 int CheckSMS();
 void checkOKstatus();
@@ -49,16 +49,20 @@ int CompareNumber();
 int initialstatus();
 int PrintSender();
 
-#define CAR_ON	PORTB |= (1<<PORTB1)
-#define CAR_OFF	PORTB &= ~(1<<PORTB1)
+#define CAR_ON	PORTA |= (1<<PORTA3)
+#define CAR_OFF	PORTA &= ~(1<<PORTA3)
 
 int a; int i; char w; int y;
 char input;
 char buff[20];
-char company[]	= "+254700000000";//" //moha's No#
-char company2[]	= "+254700000000";//; //fatah's no#
+char company[]	= "+2547XXXXXXXX";// //moha's No#
+char company2[]	= "+254700000000";// //fatah's no#
 char owner[]	= "+254XXXXXXXXX"; //kevin's no#
 
+// ISR(PCINT0_vect)
+// {
+// 	PINA |= (1<<PINA3);
+// }
 int main( void )
 {
 	
@@ -68,25 +72,42 @@ int main( void )
 	USART0_Init(MYUBRR);
 	DDRB |= (1<<DDB1); //set PORTB1 as output
 	
-//  	stdin = &uart0_input;
-//  	stdout = &uart1_output; //changed to TX1 for GSM communication. TX0 on Atmega SMD isnt working
-//	sei();
-//		fdev_close();
-		stdout = &uart1_output;
-		stdin = &uart1_input;	
+ 	stdin = &uart0_input;
+ 	stdout = &uart1_output; //changed to TX1 for GSM communication. TX0 on Atmega SMD isnt working
+//	sei();	
 	
 	_delay_ms(13000);
-//	initialstatus();//........................................................................................................................................................return this to function
+	initialstatus();
 	while(1) 
 	{
-		//check availability of SMS
-//		CheckSMS(); //check if available unread SMS and its content ........................................................................................................
+		fdev_close();
+		stdout = &uart1_output;
+		stdin = &uart1_input;
 		grabGPS();
 			
-//		fdev_close();
-// 		stdout = &uart1_output;........................................................................................................
-// 		stdin = &uart0_input;........................................................................................................
-		_delay_ms(4000);
+		fdev_close();
+		stdout = &uart1_output; 
+		stdin = &uart0_input;
+		printf("AT\r\n");
+		_delay_ms(2000);
+		printf("AT+CMGF=1\r\n");
+		_delay_ms(2000);
+		printf("AT+CPMS?\r\n");
+			//	_delay_ms(2000);
+			w = getchar();
+			while (w !=  0x2B) //w is not +
+			{ w = getchar();}
+			int q=0;
+			while (q < 7)
+			{	w = getchar();
+				if (w==0x2C) { q++;} //if w is "," in the string +CPMS: "MT",1,75,"SM",1,25,"ME",0,50
+				else{}
+			}
+			w = getchar();
+			if (w != 0x30)	//if after 7th "," in ("MT",1,75,"SM",1,25,"ME",0,50) next character is not 0
+			  {CheckSMS();}
+			else {}
+			_delay_ms(1000);
 	}
 	return 0;
 }
@@ -98,12 +119,8 @@ int CheckSMS()
 	a=0;
 	printf("AT\r\n");
 	_delay_ms(2000);
-//	checkOKstatus();
-	
 	printf("AT+CMGF=1\r\n");
 	_delay_ms(2000);
-	//	checkOKstatus();
-	
 	printf("AT+CMGL=\"REC UNREAD\"\r\n");
 	while (a < 2) //skip the <LF>
 	{
@@ -128,11 +145,11 @@ int CheckSMS()
 			CompareNumber();
 			z = buff[14] + buff[15] + buff[16]; //sum values of the 3 buffer values
 			if (z < 3) //A scenario of receiving text from an authorized no# with '1' or '0'
-				{	buff[13] = 1;
+				{	buff[13] = 0;
 					CAR_OFF; 
 				}
 			else //A scenario of receiving text from Unauthorized no#
-			{buff[13] = 0; }
+			{buff[13] = 2; }
 			  
 		}
 		else if(w == 0x031)//w is '1'
@@ -140,11 +157,11 @@ int CheckSMS()
 			CompareNumber();
 			z = buff[14] + buff[15] + buff[16]; //sum values of the 3 buffer values
 			if (z < 3) //A scenario of receiving text from an authorized no# with '1' or '0'
-			{	buff[13] = 2;
+			{	buff[13] = 1;
 				CAR_ON;
 			}
 			else //A scenario of receiving text from Unauthorized no#
-			{buff[13] = 0; }  
+			{buff[13] = 2; }  
 		}
 		else{buff[13] = 6; buff[14] = buff[15] = buff[16] = 0; }
 	}
@@ -153,7 +170,7 @@ int CheckSMS()
 		w = getchar();
 		if (w==0x04B) // if w = 'K'
 		{	buff[13] = 3; buff[14] = buff[15] = buff[16] = 0; 
-			initialstatus();
+			//initialstatus();
 		}
 		else
 		{ buff[13] = 4; buff[14] = buff[15] = buff[16] = 0; }
@@ -163,37 +180,28 @@ int CheckSMS()
 	{buff[13] = 5; buff[14] = buff[15] = buff[16] = 0; }
 		
 	int E = buff[13];
-		if (E==1) // clear sms storage area if 0/1 is received
+		if (E==0) // clear sms storage area if 0/1 is received
 		{
-//			printf("AT+CMGF=1\r\n");
-//			checkOKstatus();
 			printf("AT+CMGD=1,4\r\n"); //clearing all SMS in storage AREA
 			_delay_ms(2000);
-		//	checkOKstatus();
 			printf("AT+CMGW=\"");
 			PrintSender();
-			printf("\",145,\"STO UNSENT\"\r\n");
+			printf("\",145,\"STO UNSENT\"\r\n%d",E);
 			_delay_ms(2000);
-			printf("0");
 			putchar(0x1A); //putting AT-MSG termination CTRL+Z in USART0
 		}
-		else if (E==2) // clear sms storage area if 0/1 is received
+		else if (E==1) // clear sms storage area if 0/1 is received
 		{
-//			printf("AT+CMGF=1\r\n");
-//			checkOKstatus();
 			printf("AT+CMGD=1,4\r\n"); //clearing all SMS in storage AREA
 			_delay_ms(2000);
-		//	checkOKstatus();
 			printf("AT+CMGW=\"");
 			PrintSender();
-			printf("\",145,\"STO UNSENT\"\r\n");
+			printf("\",145,\"STO UNSENT\"\r\n%d",E);
 			_delay_ms(2000);
-			printf("1");
 			putchar(0x1A); //putting AT-MSG termination CTRL+Z in USART0
 		}
 		else
 		{}
-
 	return *buff;
 }
 
@@ -284,12 +292,10 @@ int sample_GPS_data (char *GPS0, char *GPS1)
 	printf("AT+CIPSEND\r\n");
 	_delay_ms(1000);
 
-	printf("#CAR PLATE NO:[KCQ 450R]\r\r%s\r%s\r\nBUFF[13] = 1\r\r\nCar status is = 1\r\r\nText no# is :0727XXXXXX\r\r\n",GPS0,GPS1);
+	//printf("#CAR PLATE NO:[KCQ 450R]\r\r%s\r%s\r\nBUFF[13] = %d\r\r\nCar status is = %d\r\r\nText no# is :0727XXXXXX\r\r\n",GPS0,GPS1,buff[13],buff[13]); //MOHA
+	printf("#CAR PLATE NO:[KCP 213S]\r\r%s\r%s\r\nBUFF[13] = %d\r\r\nCar status is = %d\r\r\nText no# is :0727XXXXXX\r\r\n",GPS0,GPS1,buff[13],buff[13]); //KEVIN
 	_delay_ms(2500);
-	
-// 	printf("BUFF[13] = %d\r\n", buff[13]);
-// 	_delay_ms(200);
-// 	printf("Car status is = %d\r\nText no# is :", buff[13]);
+
 // 	PrintSender();
 // 	printf("\r\n");
 	putchar(0x1A); //putting AT-MSG termination CTRL+Z in USART0
@@ -297,7 +303,7 @@ int sample_GPS_data (char *GPS0, char *GPS1)
 	printf("AT+CIPCLOSE\r\n");
 	_delay_ms(2000);
 	printf("AT+CIPSHUT\r\n");
-	_delay_ms(3000);
+	_delay_ms(2000);
 	return 0;
 }
 
@@ -314,7 +320,21 @@ int initialstatus()
 	
 	printf("AT+CPMS=\"MT\",\"SM\",\"ME\"\r\n");
 	_delay_ms(2000);
-	
+	printf("AT+CPMS?\r\n");
+//	_delay_ms(2000);
+	w = getchar();
+	while (w !=  0x2B) //w is not +
+		{ w = getchar();}
+	int q=0;
+	while (q<7)
+	{	w = getchar();
+		if (w==0x2C) { q++;} //if w is "," in the string +CPMS: "MT",1,75,"SM",1,25,"ME",0,50
+		else{}
+	}
+	w = getchar();
+	if (w != 0x30)	{CheckSMS();}
+	else {}	
+	_delay_ms(2000);	
 	printf("AT+CMGR=1\r\n");
 	while (a < 2) //skip the <LF>
 	{
@@ -397,36 +417,26 @@ while(x==0 || y==0)
 			//-----------------------------------------------------------------------
 			if(bien==6) // If initial characters match "+GPSRD" string, process the data
 			{
-				linea[0]='\n';
-				GGA = (char*) malloc(datacount+1);
-				strcpy(GGA,linea);
-				y=1;
-				// Serial.print("\r\nGPSRD character count is: ");
-				// Serial.println(SRD.length());
+				//linea[0]='\n';								
+				GGA = (char*) malloc(datacount+1);			//allocating memory to the GGA string, where datacount is length of GPS GGA string
+				strcpy(GGA,linea);							//using function strcpy to copy the char array(linea) to GGA string which we have allocated memory above
+				y=1;										//one half of the conditions to exit while(x==0 || y==0) function
 			}
 			if(bien1==6) // If initial characters match "+GPSRD" string, process the data
 			{
-				linea[0]='\n';
+				//linea[0]='\n';
 				RMC = (char*) malloc(datacount1+1);
 				strcpy(RMC,linea);
 				x=1;
-				//Serial.print("\r\nGPRMC character count is: ");
-				//Serial.println(RMC.length());
 			}
 
 			if (x==1 && y==1)
 			{
-				//sendData("AT+GPSRD=0",2000,DEBUG);
 				_delay_ms(500);
 				sample_GPS_data(GGA,RMC);
-// 				RMC="";
-				free(GGA);
-// 				GGA="";
-				free(RMC);
-// 				x=0;
-// 				y=0;
+				free(GGA); //The memory loaction pointed by GGA is freed. Otherwise it will cause error
+				free(RMC); //The memory loaction pointed by RMC is freed. Otherwise it will cause error
 				_delay_ms(2000);
-				//sendData("AT+GPSRD=1",2000,DEBUG);
 			}
 			else{}
 			//-----------------------------------------------------------------------
@@ -443,3 +453,4 @@ while(x==0 || y==0)
 } //Serial1.available
 return 0;
 } //testGPS
+
